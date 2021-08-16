@@ -1,33 +1,70 @@
 import RPi.GPIO as gpio
-import spidev as spi
 import threading
 import firebase_admin
 import time
+import datetime
+import requests
+import json
+# import spidev
 from firebase_admin import credentials
 from firebase_admin import firestore
 
-#connect to firebase database
+# spi = spidev.SpiDev()
+# spi.open(0, 0)
 
-spi = spi.SpiDev()
-spi.open(0, 0)
-
+# connect to firebase
 cred = credentials.Certificate("beacon-client-app-firebase-adminsdk-52b5p-186f3fb413.json") #key file name
 firebase_admin.initialize_app(cred)
 
 db = firestore.client()
 doc_ref = db.collection(u'FireState').document(u'Sensors')
 
-#preprocess to send push message
+# preprocess to send push message
 url = "https://fcm.googleapis.com/fcm/send"
+url_group = "https://fcm.googleapis.com/fcm/notification"
+
 headers = {
   'Authorization': 'key=AAAAFYmlCLM:APA91bFMWQ1z8LQvRn_ffgxx9_CsOwAj4uVhINfwEDxIRdbE254cPkPvjuC3Dxt4adtfEzaVUbIUEAmIjZR7A_dBh2reGklHoZhlcsSSRWeodwBndLjXyxwOpADWI9oIH9CkEpe-Frq2', # key value of firebase project
   'Content-Type': 'application/json'
 }
 
+headers_group = {
+  'Authorization': 'key=AAAAFYmlCLM:APA91bFMWQ1z8LQvRn_ffgxx9_CsOwAj4uVhINfwEDxIRdbE254cPkPvjuC3Dxt4adtfEzaVUbIUEAmIjZR7A_dBh2reGklHoZhlcsSSRWeodwBndLjXyxwOpADWI9oIH9CkEpe-Frq2', # key value of firebase project
+  'Content-Type': 'application/json',
+  'project_id' : '92503607475'
+}
+
 callback_done = threading.Event()
 
-floors_dict = { 1:[], 2:[]}
+floors_dict = {1: [], 2: []}
 
+
+def get_group_token(floor, tokens):
+    if (len(tokens) != 0):
+        token_name = "floor_" + str(floor)
+        payload = json.dumps({
+           "operation": "create",
+           "notification_key_name": token_name,
+           "registration_ids": tokens,
+            })
+        response = requests.request("POST", url_group , headers=headers_group, data=payload)
+        print(token_name)
+        print(json.loads(response.text))
+        return(json.loads(response.text)['notification_key'])
+    else:
+        return 0
+
+def remove_group_token(floor, tokens, not_key):
+    token_name = "floor_" + str(floor)
+    payload = json.dumps({
+       "operation": "remove",
+       "notification_key_name": token_name,
+       "registration_ids": tokens,
+       "notification_key" : not_key
+        })
+    response = requests.request("POST", url_group , headers=headers_group, data=payload)
+    print(token_name)
+    print(json.loads(response.text))
 
 class FlameSensor:
     def __init__(self, pin):
@@ -36,6 +73,7 @@ class FlameSensor:
         gpio.setup(self.pin, gpio.IN, pull_up_down=gpio.PUD_UP)
 
 
+"""
 class MQ2Sensor:
     def __init__(self, ch_num):
         self.chNum = ch_num
@@ -51,106 +89,106 @@ class MQ2Sensor:
         mq2 = self.read_adc()
         print(f"gas : {mq2}")
         return mq2
+"""
+
+
+def calc_time(self):
+    now = datetime.datetime.now()
+    date = now.strftime("%Y/%m/%d %H:%M")
+    return date
 
 
 class Floor:
     def __init__(self, floor: int, flame_pin: int, ch_num: int):
         self.floor = floor
-        self.mq2Sensor = MQ2Sensor(ch_num)
+        self.is_first = True
+        # self.mq2Sensor = MQ2Sensor(ch_num)
         self.flameSensor = FlameSensor(flame_pin)
         self.gasStandard = 200  # 가스 센서 통해 실험 해보고 값 변경할 것.
 
-    def calc_time(self):
-        now = datetime.datetime.now()
-        date = now.strftime("%Y/%m/%d %H:%M")
-        return date
-
     def send_message_to_firebase(self):
-        date = self.calc_time()
+        date = calc_time()
 
-        if self.mq2Sensor.gas() > self.gasStandard:
-            print(f'Fire detected on {self.floor} floor')
-            Fcm.sendFcm()
-#            doc_ref.set({
-#                u'Time': date,
-#                u'Floor': self.floor,
-#                u'FireDetected': u'TRUE'
-#            })
-#         else:
-           # doc_ref.set({
-           #     u'Time': date,
-           #     u'Floor': self.floor,
-           #     u'FireDetected': u'FALSE'
-           # })
+        # if self.mq2Sensor.gas() > self.gasStandard:
+
+        print(f'Fire detected on {self.floor} floor')
+        send_fcm(self.floor, is_first)
+        doc_ref.set({
+                u'Time': date,
+                u'Floor': self.floor,
+                u'FireDetected': u'TRUE'
+        })
+        if (self.is_first):
+            self.is_first == False
 
     def fire_detect(self):
         gpio.add_event_detect(self.flameSensor.pin, gpio.RISING, callback=lambda x: self.send_message_to_firebase(),
                               bouncetime=50)
 
+
 def add_dict(to_add, floor):
-    for num, floors in main.floors_dict.items():
-        if (num != floor and to_add in floors):
+    for num, floors in floors_dict.items():
+        if num != floor and to_add in floors:
             floors.remove(to_add)
-            main.floors_dict[num] = floors
-        elif (num == floor and to_add in floors):
-            return
-        elif (num == floor and to_add not in floors):
-            main.floors_dict[floor].append(to_add)
+            floors_dict[num] = floors
+        elif num == floor and to_add not in floors:
+            floors_dict[floor].append(to_add)
         db.collection(u'floors').document(str(num)).set({
-            'tokens': main.floors_dict[num]
+            'tokens': floors_dict[num]
         })
 
 
-def sendFcm():
+def send_fcm(fire_floor, is_first):
     users_ref = db.collection(u'workplace')
     docs = users_ref.stream()
-    for doc in docs:
-        if ((doc.to_dict())["enter"]):
-            print(f'{(doc.to_dict())["token"]} = {(doc.to_dict())["enter"]}')
-            # print((doc.to_dict()))
-            msg = "your floor is " + str((doc.to_dict())["floor"])
+    for floor in range(1,3):
+        #group_key = get_group_token(floor, floors_dict[floor])
+        group_key = get_group_token(floor, floors_dict[2])
+        print(f'send to {group_key}')
+        # print((doc.to_dict()))
+        if (group_key != 0):
             payload = json.dumps({
-                "to": (doc.to_dict())["token"],
-                "notification": {
-                    "title": "Warning!!!",
-                    "body": "Fire in the building!!!!",
-                    "image": "https://us.123rf.com/450wm/yehorlisnyi/yehorlisnyi1610/yehorlisnyi161000137/64114511-%EA%B2%A9%EB%A6%AC-%EB%90%9C-%EC%B6%94%EC%83%81-%EB%B6%89%EC%9D%80-%EC%83%89%EA%B3%BC-%EC%98%A4%EB%A0%8C%EC%A7%80%EC%83%89-%ED%99%94%EC%9E%AC-%EB%B6%88%EA%BD%83-%ED%9D%B0%EC%83%89-%EB%B0%B0%EA%B2%BD%EC%97%90-%EC%84%A4%EC%A0%95-%EC%BA%A0%ED%94%84-%ED%8C%8C%EC%9D%B4%EC%96%B4-%EB%A7%A4%EC%9A%B4-%EC%9D%8C%EC%8B%9D-%EA%B8%B0%ED%98%B8%EC%9E%85%EB%8B%88%EB%8B%A4-%EC%97%B4-%EC%95%84%EC%9D%B4%EC%BD%98%EC%9E%85%EB%8B%88%EB%8B%A4-%EB%9C%A8%EA%B1%B0%EC%9A%B4-%EC%97%90%EB%84%88%EC%A7%80-%EA%B8%B0%ED%98%B8%EC%9E%85%EB%8B%88%EB%8B%A4-%EB%B2%A1%ED%84%B0-%ED%99%94%EC%9E%AC-%EA%B7%B8%EB%A6%BC%EC%9E%85%EB%8B%88%EB%8B%A4-.jpg?ver=6"
-                },
+                "to": group_key,
                 "data": {
-                    "floor": (doc.to_dict())['floor']
+                    "floor": floor,
+                    "fire_floor" : fire_floor,
+                    "floor_1_people" : len(floors_dict[1]),
+                    "floor_2_people" : len(floors_dict[2])
                 }
             })
             response = requests.request("POST", url, headers=headers, data=payload)
             print(response.text)
-    print(type(docs))
+            remove_group_token(floor, floors_dict[2], group_key)
+
 
 
 # Create a callback on_snapshot function to capture changes
-def on_snapshot(col_snapshot ,changes, read_time):
+def on_snapshot(col_snapshot,changes, read_time):
     print(u'Callback received query snapshot.')
-    print(f"floor :")
+    # print(f"floor :")
     for doc in col_snapshot:
         add_dict(doc.id, (doc.to_dict())['floor'])
     callback_done.set()
 
-for i in range(1,3):
-    col_query = db.collection(u'workplace').where(u'floor', u'==', i)
-    query_watch = col_query.on_snapshot(on_snapshot)
-    time.sleep(3)
-    db.collection(u'floors').document(str(i)).set({
-        'tokens': floors_dict[i]
-    })
+def start_watch():
+    for i in range(1, 3):
+        col_query = db.collection(u'workplace').where(u'floor', u'==', i)
+        query_watch = col_query.on_snapshot(on_snapshot)
+        time.sleep(3)
+        db.collection(u'floors').document(str(i)).set({
+            'tokens': floors_dict[i]
+        })
 
 
-First_floor = Detect.Floor(1, 17, 0)
-Second_floor = Detect.Floor(2, 22, 1)
-#Third_floor = Detect.Floor(3, 27, 2)
+First_floor = Floor(1, 17, 0)
+Second_floor = Floor(2, 22, 1)
+# Third_floor = Detect.Floor(3, 27, 2)
 
 
 def process():
     First_floor.fire_detect()
     Second_floor.fire_detect()
-    #Third_floor.fire_detect()
+    # Third_floor.fire_detect()
     while True:
         time.sleep(3)
 
@@ -159,9 +197,8 @@ if __name__ == '__main__':
     try:
         print("Detect Start")
         process()
+        start_watch()
     except KeyboardInterrupt:
         print()
         print("End by KeyboardInterrupt!")
         gpio.cleanup()
-
-
