@@ -38,9 +38,11 @@ callback_done = threading.Event()
 
 floors_dict = {1: [], 2: []}
 
+img_url = ['https://firebasestorage.googleapis.com/v0/b/beacon-client-app.appspot.com/o/evacuation_1.png?alt=media&token=2dafbbfd-96dd-4b8a-b620-3df0d875f696',
+    'https://firebasestorage.googleapis.com/v0/b/beacon-client-app.appspot.com/o/evacuation_2.png?alt=media&token=f8d942f7-d5d2-4e10-89f0-07d50bad7f12']
 
 def get_group_token(floor, tokens):
-    if (len(tokens) != 0):
+    if len(tokens) != 0:
         print(len(tokens))
         token_name = "floor_" + str(floor)
         payload = json.dumps({
@@ -48,15 +50,16 @@ def get_group_token(floor, tokens):
            "notification_key_name": token_name,
            "registration_ids": tokens,
             })
-        response = requests.request("POST", url_group , headers=headers_group, data=payload)
+        response = requests.request("POST", url_group, headers=headers_group, data=payload)
         print(token_name)
         print(json.loads(response.text))
         try:
-            return(json.loads(response.text)['notification_key'])
+            return json.loads(response.text)['notification_key']
         except:
             return 0
     else:
         return 0
+
 
 def remove_group_token(floor, tokens, not_key):
     token_name = "floor_" + str(floor)
@@ -66,9 +69,10 @@ def remove_group_token(floor, tokens, not_key):
        "registration_ids": tokens,
        "notification_key" : not_key
         })
-    response = requests.request("POST", url_group , headers=headers_group, data=payload)
+    response = requests.request("POST", url_group, headers=headers_group, data=payload)
     print(token_name)
     print(json.loads(response.text))
+
 
 class FlameSensor:
     def __init__(self, pin):
@@ -96,7 +100,7 @@ class MQ2Sensor:
 """
 
 
-def calc_time(self):
+def calc_time():
     now = datetime.datetime.now()
     date = now.strftime("%Y/%m/%d %H:%M")
     return date
@@ -116,14 +120,14 @@ class Floor:
         # if self.mq2Sensor.gas() > self.gasStandard:
 
         print(f'Fire detected on {self.floor} floor')
-        send_fcm(self.floor, is_first)
+        send_fcm(self.floor, self.is_first)
         doc_ref.set({
                 u'Time': date,
                 u'Floor': self.floor,
                 u'FireDetected': u'TRUE'
         })
-        if (self.is_first):
-            self.is_first == False
+        if self.is_first:
+            self.is_first = False
 
     def fire_detect(self):
         gpio.add_event_detect(self.flameSensor.pin, gpio.RISING, callback=lambda x: self.send_message_to_firebase(),
@@ -145,18 +149,19 @@ def add_dict(to_add, floor):
 def send_fcm(fire_floor, is_first):
     users_ref = db.collection(u'workplace')
     docs = users_ref.stream()
-    for floor in range(1,3):
+    for floor in range(1, 3):
         group_key = get_group_token(floor, floors_dict[floor])
         print(f'send to {group_key}')
         # print((doc.to_dict()))
-        if (group_key != 0):
+        if group_key != 0:
             payload = json.dumps({
                 "to": group_key,
                 "data": {
                     "floor": floor,
-                    "fire_floor" : fire_floor,
-                    "floor_1_people" : len(floors_dict[1]),
-                    "floor_2_people" : len(floors_dict[2])
+                    "fire_floor": fire_floor,
+                    "floor_1_people": len(floors_dict[1]),
+                    "floor_2_people": len(floors_dict[2]),
+                    "image": img_url[floor -1]
                 }
             })
             response = requests.request("POST", url, headers=headers, data=payload)
@@ -164,16 +169,17 @@ def send_fcm(fire_floor, is_first):
             remove_group_token(floor, floors_dict[2], group_key)
 
 
-
 # Create a callback on_snapshot function to capture changes
 
-def on_snapshot(col_snapshot,changes, read_time):
+
+def on_snapshot(col_snapshot, changes, read_time):
     print(u'Callback received query snapshot.')
     # print(f"floor :")
     for doc in col_snapshot:
-        if ((doc.to_dict())['enter'] == True):
+        if (doc.to_dict())['enter']:
             add_dict(doc.id, (doc.to_dict())['floor'])
     callback_done.set()
+
 
 def start_watch():
     for i in range(1, 3):
@@ -186,11 +192,11 @@ def start_watch():
 
 
 First_floor = Floor(1, 17, 0)
-Second_floor = Floor(2, 22, 1)
-# Third_floor = Detect.Floor(3, 27, 2)
+Second_floor = Floor(2, 27, 1)
+# Third_floor = Detect.Floor(3, 22, 2)
 
 
-def process():
+def detect():
     First_floor.fire_detect()
     Second_floor.fire_detect()
     # Third_floor.fire_detect()
@@ -201,8 +207,8 @@ def process():
 if __name__ == '__main__':
     try:
         print("Detect Start")
-        process()
         start_watch()
+        detect()
     except KeyboardInterrupt:
         print()
         print("End by KeyboardInterrupt!")
