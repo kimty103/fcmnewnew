@@ -41,6 +41,7 @@ floors_dict = {1: [], 2: []}
 
 def get_group_token(floor, tokens):
     if (len(tokens) != 0):
+        print(len(tokens))
         token_name = "floor_" + str(floor)
         payload = json.dumps({
            "operation": "create",
@@ -50,7 +51,10 @@ def get_group_token(floor, tokens):
         response = requests.request("POST", url_group , headers=headers_group, data=payload)
         print(token_name)
         print(json.loads(response.text))
-        return(json.loads(response.text)['notification_key'])
+        try:
+            return(json.loads(response.text)['notification_key'])
+        except:
+            return 0
     else:
         return 0
 
@@ -142,8 +146,7 @@ def send_fcm(fire_floor, is_first):
     users_ref = db.collection(u'workplace')
     docs = users_ref.stream()
     for floor in range(1,3):
-        #group_key = get_group_token(floor, floors_dict[floor])
-        group_key = get_group_token(floor, floors_dict[2])
+        group_key = get_group_token(floor, floors_dict[floor])
         print(f'send to {group_key}')
         # print((doc.to_dict()))
         if (group_key != 0):
@@ -163,11 +166,13 @@ def send_fcm(fire_floor, is_first):
 
 
 # Create a callback on_snapshot function to capture changes
+
 def on_snapshot(col_snapshot,changes, read_time):
     print(u'Callback received query snapshot.')
     # print(f"floor :")
     for doc in col_snapshot:
-        add_dict(doc.id, (doc.to_dict())['floor'])
+        if ((doc.to_dict())['enter'] == True):
+            add_dict(doc.id, (doc.to_dict())['floor'])
     callback_done.set()
 
 def start_watch():
